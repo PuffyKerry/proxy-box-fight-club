@@ -49,7 +49,7 @@ class CommServer: #not to be confused with server.py, this is the actual server
             os.remove(self.socket_path)
         self.server_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.server_sock.bind(self.socket_path)
-        os.chmod(self.socket_path, 0o777)
+        os.chmod(self.socket_path, 0o666)
         self.server_sock.listen(16)
         self.server_sock.setblocking(False)
         self.selector.register(self.server_sock, selectors.EVENT_READ, data=self._accept)
