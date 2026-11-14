@@ -65,7 +65,7 @@ def main():
                             print(f"{C_YEL}{m['msg']}{C_RESET}")
                         elif mtype == 'RADIO':
                             color = C_CYAN if m.get('team') == 'BLUFOR' else C_RED
-                            print(f"{color}[RADIO {m['team']}] {m['sender']} ({m['role']}): {m['msg']}{C_RESET}")
+                            print(f"{color}[RADIO {m['team']}] {m['sender']}: {m['msg']}{C_RESET}")
                         elif mtype == 'WHISPER':
                             print(f"{C_MAG}[BACK CHANNEL from {m['sender']}]: {m['msg']}{C_RESET}")
                         elif mtype == 'SUMMIT':

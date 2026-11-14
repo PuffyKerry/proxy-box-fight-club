@@ -161,13 +161,13 @@ class ColdWarServer:
                 return
 
             radio_team = player['apparent_team'] #Diplomatic actors broadcast on their apparent_team radio, to represent soft power being able to mislead decision makers, institutions, etc.
-            shown_role = "Operative" if player['role'] == 'Diplomatic' else player['role']
+            #shown_role = "Operative" if player['role'] == 'Diplomatic' else player['role']
             self.log(f"Multicast [Radio {radio_team}] {player['name']} (True={player['true_team']}/{player['role']}): {content}")
             self.comm.send_group(radio_team, {
                 'type': 'RADIO',
                 'team': radio_team,
                 'sender': player['name'],
-                'role': shown_role,
+                #'role': shown_role,
                 'msg': content
             })
 
