@@ -1,4 +1,5 @@
-# Proxy Box Fight Club (CSE 536 - Project #1)
+# Proxy Box Fight Club (CSE 536 - Project #1/#2/#3)
+# Note: Project 2/3 at bottom of README
 Author: Kerry Zhuo
 
 ## Overview
@@ -61,3 +62,10 @@ Proxy Box Fight Club is a multi-user, multi-process geopolitical Team DeathMatch
    - whisper <player> <m>  : Send a covert 1-to-1 back-channel message (Any Phase).
    - vote <player>         : Vote to censure a suspect during the Tribunal Phase.
    - exit (or Ctrl+C)      : Disconnect and exit.
+
+## Project 2 & 3 Isolation & DoS Hardening Additions
+- Linux cgroups v2 (/sys/fs/cgroup/proxybox): DoS defense, caps player processes at 20% CPU (cpu.max), 64 MB RAM (memory.max), and 32 PIDs (pids.max).
+- Kernel RLIMIT & prctl Sandbox: CommClient._apply_isolation() sets RLIMIT_AS (128 MB), RLIMIT_NPROC (32), and prctl(PR_SET_NO_NEW_PRIVS, 1) on connect().
+- /proc VFS Isolation: setup.sh mounts /proc with hidepid=2 so unprivileged players cannot see moderator or other players' PIDs (should have been in the Project #1 release tbh).
+- Socket DoS Protections: Per-UID connection limit (MAX_CONNS_PER_UID = 2) in _accept() and non-blocking send() disconnect on EAGAIN/SIGSTOP stalls.
+- crash_test.py: Automated adversarial benchmark testing all isolation layers.

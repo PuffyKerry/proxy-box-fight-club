@@ -11,6 +11,9 @@ Features:
    This is meant to defeat side channel attacks like /proc/[pid]/stat (spyboth.sh example from class) 
    and /dev/pts mtime (spy.sh example from class).
 4. Signal Safety: Decided to ignore SIGPIPE because broken pipes can cause crashes. 
+5. OS Isolation & DoS Hardening (Projects 2 & 3): Puts clients into a cgroup v2 resource jail, 
+   slaps RLIMITs and PR_SET_NO_NEW_PRIVS on client processes, caps sockets per UID, and drops 
+   clients that try to stall the server with SIGSTOP (Ctrl+Z).
 
 Basically all the backend communications happens here. 
 """
@@ -22,9 +25,14 @@ import selectors
 import json
 import pwd
 import signal
+import resource
+import ctypes
 
-SO_PEERCRED = 17  #Linux kernel socket option for peer credentials
+SO_PEERCRED = 17         #Linux kernel socket option for peer credentials
+PR_SET_NO_NEW_PRIVS = 38 #Linux prctl constant to stop setuid/setgid privilege escalation shenanigans
 MAX_BUF_SIZE = 8192
+MAX_CONNS_PER_UID = 2    #cap connections per UID so one user can't spam sockets and eat all our file descriptors
+CGROUP_PROCS_PATH = "/sys/fs/cgroup/proxybox/cgroup.procs" #path for cgroup v2 resource jail
 
 class CommServer: #not to be confused with server.py, this is the actual server
     def __init__(self, socket_path="/tmp/coldwar_ipc/game.sock", enable_chaff=True): #this is not modular. for now
@@ -70,6 +78,17 @@ class CommServer: #not to be confused with server.py, this is the actual server
         conn, _ = sock.accept()
         conn.setblocking(False)
         pid, uid, username = self._get_peer_cred(conn)
+
+        uid_conns = sum(1 for c in self.clients.values() if c['uid'] == uid) #reject connection floods from the same UID before we bother allocating memory/state for them
+        if uid_conns >= MAX_CONNS_PER_UID:
+            try:
+                err = json.dumps({'type': 'ERR', 'msg': 'Too many open connections for your UID.'}) + '\n'
+                conn.send(err.encode('utf-8'))
+            except Exception:
+                pass
+            conn.close()
+            return
+
         cid = self.next_client_id
         self.next_client_id += 1
 
@@ -138,9 +157,11 @@ class CommServer: #not to be confused with server.py, this is the actual server
         if client:
             try:
                 raw = (json.dumps(payload_dict) + '\n').encode('utf-8') #adds newline separators for readability
-                client['sock'].sendall(raw)
+                client['sock'].send(raw)
+            except BlockingIOError: #if a client pauses their terminal with Ctrl+Z (SIGSTOP) and their buffer fills up, drop them instead of letting them freeze the whole server
+                self._disconnect(client['sock'])
             except Exception:
-                pass
+                self._disconnect(client['sock'])
 
     def _send_chaff_to_others(self, excluded_cids, target_len=64): #send dummy packets to non-recipient clients to mask CPU wakeups and PTY timestamps of the intended recipient, which are possible side channels. 
         if not self.enable_chaff:
@@ -199,13 +220,34 @@ class CommServer: #not to be confused with server.py, this is the actual server
 
 
 class CommClient: #very basic client objects meant to adhere to least privilege by keeping communications handling solely server-side
-    def __init__(self, socket_path="/tmp/coldwar_ipc/game.sock"):
+    def __init__(self, socket_path="/tmp/coldwar_ipc/game.sock", enforce_isolation=True):
         signal.signal(signal.SIGPIPE, signal.SIG_IGN)
         self.socket_path = socket_path
+        self.enforce_isolation = enforce_isolation
         self.sock = None
         self.buf = ""
 
-    def connect(self): #map socket path to self 
+    def _apply_isolation(self): #shove client into cgroup v2 jail, slap RLIMITs on memory/processes, and turn on PR_SET_NO_NEW_PRIVS because we don't trust players
+        if os.path.exists(CGROUP_PROCS_PATH):
+            try:
+                with open(CGROUP_PROCS_PATH, "w") as f:
+                    f.write(str(os.getpid()))
+            except OSError:
+                pass
+        try:
+            resource.setrlimit(resource.RLIMIT_AS, (128 * 1024 * 1024, 128 * 1024 * 1024)) #128 MB max virtual memory
+            resource.setrlimit(resource.RLIMIT_NPROC, (32, 32)) #max 32 processes per user
+        except Exception:
+            pass
+        try:
+            libc = ctypes.CDLL("libc.so.6")
+            libc.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) #disable setuid privilege escalation for this process and any children
+        except Exception:
+            pass
+
+    def connect(self): #map socket path to self and lock down process first
+        if self.enforce_isolation:
+            self._apply_isolation()
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.connect(self.socket_path)
         self.sock.setblocking(False)
